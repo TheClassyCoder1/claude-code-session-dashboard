@@ -74,7 +74,7 @@ function main() {
   // 3. Merge hook entries idempotently.
   settings.hooks = settings.hooks || {};
   let changed = false;
-  for (const event of ["Stop", "SessionEnd"]) {
+  for (const event of ["SessionStart", "Stop", "SessionEnd"]) {
     settings.hooks[event] = Array.isArray(settings.hooks[event]) ? settings.hooks[event] : [];
     if (hasOurHook(settings.hooks[event])) {
       log(`• ${event}: feature-logger hook already present — skipping`);

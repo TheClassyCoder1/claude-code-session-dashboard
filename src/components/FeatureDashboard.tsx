@@ -1,9 +1,17 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { aggregate, type FeatureRecord } from "@/lib/featureTypes";
+import {
+  aggregate,
+  deriveStatus,
+  STATUS_META,
+  type FeatureRecord,
+  type Status,
+} from "@/lib/featureTypes";
 import StatsHeader from "./StatsHeader";
 import FeatureItem from "./FeatureItem";
+
+const SECTION_ORDER: Status[] = ["in_progress", "todo", "done"];
 
 export default function FeatureDashboard({ records }: { records: FeatureRecord[] }) {
   const projects = useMemo(
@@ -17,6 +25,12 @@ export default function FeatureDashboard({ records }: { records: FeatureRecord[]
     [records, project],
   );
   const stats = useMemo(() => aggregate(filtered), [filtered]);
+
+  const groups = useMemo(() => {
+    const g: Record<Status, FeatureRecord[]> = { in_progress: [], todo: [], done: [] };
+    for (const r of filtered) g[deriveStatus(r)].push(r);
+    return g;
+  }, [filtered]);
 
   if (records.length === 0) {
     return (
@@ -54,10 +68,28 @@ export default function FeatureDashboard({ records }: { records: FeatureRecord[]
         </div>
       )}
 
-      <div className="space-y-3">
-        {filtered.map((r) => (
-          <FeatureItem key={`${r.projectPath}:${r.sessionId}`} record={r} />
-        ))}
+      <div className="space-y-6">
+        {SECTION_ORDER.map((status) => {
+          const items = groups[status];
+          if (items.length === 0) return null;
+          const meta = STATUS_META[status];
+          return (
+            <section key={status}>
+              <div className="mb-2 flex items-center gap-2">
+                <span className={`h-2 w-2 rounded-full ${meta.dot}`} />
+                <h2 className="text-sm font-semibold text-slate-700">{meta.label}</h2>
+                <span className="rounded-full bg-slate-200 px-2 text-xs text-slate-600">
+                  {items.length}
+                </span>
+              </div>
+              <div className="space-y-3">
+                {items.map((r) => (
+                  <FeatureItem key={`${r.projectPath}:${r.sessionId}`} record={r} />
+                ))}
+              </div>
+            </section>
+          );
+        })}
       </div>
     </div>
   );

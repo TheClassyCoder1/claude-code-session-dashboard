@@ -9,16 +9,18 @@ which uses your existing Claude Code subscription.
 
 ## How it works
 
-It registers two global hooks:
+It registers three global hooks that map to a lifecycle status the dashboard shows:
 
+- **`SessionStart`** → seeds a record so the session shows as **To do** (started, not
+  picked up yet) even before any work happens.
 - **`Stop`** (fires every turn) — cheap, no LLM. Parses the session transcript and upserts
   `~/.claude/feature-log/<project-slug>/<session_id>.json` with token totals, files changed
-  (bucketed by feature area), key commands, your prompts, and timestamps. Idempotent: it
-  recomputes from the transcript each turn, so re-runs update the same file.
+  (bucketed by feature area), key commands, your prompts, and timestamps. Moves the record
+  to **In progress**. Idempotent: it recomputes from the transcript each turn.
 - **`SessionEnd`** (fires once when the session ends) — builds a compact prompt from the
   captured data (never the whole transcript) and calls `claude -p --output-format json` to
-  write a headline + 2–4 sentence narrative, storing it (and the summary's own token cost).
-  Falls back to a heuristic summary if `claude` isn't available.
+  write a headline + 2–4 sentence narrative, marking the record **Done**. Falls back to a
+  heuristic summary if `claude` isn't available.
 
 Recursion is prevented two ways: the hook exits early when `stop_hook_active` is true, and
 it sets `FEATURE_LOGGER_ACTIVE=1` before calling `claude -p` (the child inherits it and
@@ -43,6 +45,9 @@ copy `feature-logger.mjs` to `~/.claude/feature-logger/` yourself and add this t
 ```json
 {
   "hooks": {
+    "SessionStart": [
+      { "matcher": "", "hooks": [ { "type": "command", "command": "~/.claude/feature-logger/feature-logger.mjs", "timeout": 60 } ] }
+    ],
     "Stop": [
       { "matcher": "", "hooks": [ { "type": "command", "command": "~/.claude/feature-logger/feature-logger.mjs", "timeout": 60 } ] }
     ],
