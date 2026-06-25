@@ -35,12 +35,12 @@ export default function FeatureItem({ record }: { record: FeatureRecord }) {
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <span
-              className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${meta.badge}`}
+              className={`inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold ${meta.badge}`}
             >
               <span className={`h-1.5 w-1.5 rounded-full ${meta.dot}`} />
               {meta.label}
             </span>
-            <p className="truncate text-sm font-semibold text-slate-800">{headline}</p>
+            <p className="min-w-0 truncate text-sm font-semibold text-slate-800">{headline}</p>
           </div>
           <p className="mt-1 text-xs text-slate-500">
             {record.projectName} · {formatDate(record.endedAt)} · {shortModel(record.model)} ·{" "}
