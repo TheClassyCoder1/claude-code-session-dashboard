@@ -18,6 +18,10 @@ const tasksSchema = z.object({
       z.object({
         title: z.string().trim().min(1).max(200),
         body: z.string().max(2000),
+        details: z.string().max(4000),
+        devStrategy: z.string().max(4000),
+        iteration: z.number().int().min(1).max(20),
+        estimatedTokens: z.number().int().min(0).max(10_000_000),
       }),
     )
     .min(1)
@@ -38,8 +42,19 @@ const OUTPUT_FORMAT = {
           properties: {
             title: { type: "string" },
             body: { type: "string" },
+            details: { type: "string" },
+            devStrategy: { type: "string" },
+            iteration: { type: "integer" },
+            estimatedTokens: { type: "integer" },
           },
-          required: ["title", "body"],
+          required: [
+            "title",
+            "body",
+            "details",
+            "devStrategy",
+            "iteration",
+            "estimatedTokens",
+          ],
           additionalProperties: false,
         },
       },
@@ -49,10 +64,17 @@ const OUTPUT_FORMAT = {
   },
 };
 
-const SYSTEM_PROMPT =
-  "You break a high-level goal into a short list of concrete, actionable kanban task cards. " +
-  "Produce between 3 and 6 tasks. Each task has a short imperative title and a one- or " +
-  "two-sentence body describing what to do. Order them in a sensible sequence.";
+const SYSTEM_PROMPT = [
+  "You break a high-level software goal into a short list of concrete, actionable kanban task cards.",
+  "Produce between 3 and 6 tasks, ordered in a sensible build sequence.",
+  "For each task provide:",
+  "- title: a short imperative title (e.g. 'Set up the database schema').",
+  "- body: a one- or two-sentence summary of what to do.",
+  "- details: a fuller description of what the task involves and why it matters.",
+  "- devStrategy: a detailed, practical development strategy for implementing this task — concrete steps, tools/approaches, and things to watch out for.",
+  "- iteration: an integer phase number (starting at 1) that groups tasks into logical stages; tasks that can ship together share an iteration, and dependent work uses a higher number.",
+  "- estimatedTokens: your estimate of the number of LLM tokens it would take an AI coding agent to implement this task end to end, as a rough effort/complexity signal (a larger or more complex task gets a larger number).",
+].join("\n");
 
 export async function POST(request: Request) {
   let payload: unknown;

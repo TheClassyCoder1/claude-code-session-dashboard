@@ -6,7 +6,9 @@ describe a goal and **Claude** breaks it into task cards for you.
 - Three columns: **To Do · In Progress · Done**
 - Create, edit, and delete cards
 - Drag cards within and across columns (powered by [dnd-kit](https://dndkit.com/))
-- **Generate tasks with Claude** — type a high-level goal, get actionable cards in "To Do"
+- **Generate tasks with Claude** — type a high-level goal, get actionable cards in "To Do".
+  Each generated card is rich: a **phase** number, an **estimated effort** (token count),
+  a detailed description, and a step-by-step **dev strategy** (shown under "Details")
 - Persists across restarts (no database setup required)
 
 ## Tech stack
@@ -73,6 +75,11 @@ The Claude integration (`src/app/api/generate/route.ts`) calls the Messages API
 with **structured outputs** (a JSON schema constraining the response) and
 **adaptive thinking**, validates the result with Zod, and persists the cards. It
 handles the `refusal` stop reason and missing-key / network errors gracefully.
+
+Each generated task is returned with `title`, `body` (summary), `details`,
+`devStrategy`, `iteration` (phase number), and `estimatedTokens` (Claude's effort
+estimate). These rich fields appear only on Claude-generated cards; manually-added
+cards stay simple (title + body).
 
 ## Data persistence
 

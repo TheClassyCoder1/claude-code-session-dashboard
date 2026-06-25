@@ -107,11 +107,65 @@ export default function CardItem({ card, onEdit, onDelete }: Props) {
           </button>
         </div>
       </div>
+      {(card.iteration != null || card.estimatedTokens != null) && (
+        <div className="mt-1.5 flex flex-wrap gap-1.5">
+          {card.iteration != null && (
+            <span className="rounded bg-indigo-100 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700">
+              Phase {card.iteration}
+            </span>
+          )}
+          {card.estimatedTokens != null && (
+            <span
+              className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700"
+              title="Claude-estimated effort to implement this task"
+            >
+              ~{formatTokens(card.estimatedTokens)} tokens
+            </span>
+          )}
+        </div>
+      )}
+
       {card.body && (
         <p className="mt-1 whitespace-pre-wrap text-xs text-slate-500">
           {card.body}
         </p>
       )}
+
+      {(card.details || card.devStrategy) && (
+        <details
+          className="mt-2 text-xs"
+          // Keep the disclosure interactive without starting a drag.
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          <summary className="cursor-pointer select-none text-[11px] font-medium text-slate-400 hover:text-slate-600">
+            Details
+          </summary>
+          {card.details && (
+            <p className="mt-1 whitespace-pre-wrap text-slate-600">
+              {card.details}
+            </p>
+          )}
+          {card.devStrategy && (
+            <div className="mt-2">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                Dev strategy
+              </p>
+              <p className="mt-0.5 whitespace-pre-wrap text-slate-600">
+                {card.devStrategy}
+              </p>
+            </div>
+          )}
+        </details>
+      )}
     </div>
   );
+}
+
+// Compact token display: 1500 -> "1.5k", 800 -> "800".
+function formatTokens(n: number): string {
+  if (n >= 1000) {
+    const k = n / 1000;
+    return `${k % 1 === 0 ? k.toFixed(0) : k.toFixed(1)}k`;
+  }
+  return String(n);
 }

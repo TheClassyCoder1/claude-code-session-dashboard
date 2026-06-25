@@ -9,4 +9,9 @@ export type Card = {
   position: number;
   createdAt: string;
   updatedAt: string;
+  // Rich fields populated only on Claude-generated cards (optional otherwise).
+  details?: string; // detailed description of the task
+  devStrategy?: string; // detailed development approach
+  iteration?: number; // phase number grouping the work (1, 2, 3…)
+  estimatedTokens?: number; // Claude-estimated effort, as a token count
 };

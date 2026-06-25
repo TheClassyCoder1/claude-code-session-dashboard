@@ -84,7 +84,14 @@ export async function createCard(input: {
 
 /** Append several cards to the end of a column (used by the Claude generator). */
 export async function createCards(
-  items: { title: string; body?: string }[],
+  items: {
+    title: string;
+    body?: string;
+    details?: string;
+    devStrategy?: string;
+    iteration?: number;
+    estimatedTokens?: number;
+  }[],
   column: ColumnId,
 ): Promise<Card[]> {
   const cards = await load();
@@ -97,6 +104,10 @@ export async function createCards(
       id: randomUUID(),
       title: item.title,
       body: item.body ?? "",
+      details: item.details,
+      devStrategy: item.devStrategy,
+      iteration: item.iteration,
+      estimatedTokens: item.estimatedTokens,
       column,
       position: pos,
       createdAt: now(),
