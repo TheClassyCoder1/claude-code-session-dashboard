@@ -4,9 +4,9 @@ import os from "os";
 
 // Reads your local Claude Code history (~/.claude/projects/<proj>/<session>.jsonl)
 // and reconstructs "what you worked on" as work items — entirely offline, no API
-// key. Each session transcript is a stream of JSON events (your prompts, the
-// assistant's actions). We group the assistant's file edits and meaningful
-// commands under the human prompt that triggered them.
+// key. Rather than grouping by the prompts you typed (noisy), we collect every
+// file the assistant created/edited across a project and bucket them into logical
+// feature areas, so the board reads like real work: "API routes", "Board UI", etc.
 
 export type WorkItem = {
   sourceKey: string; // stable id for dedup across re-imports
@@ -18,151 +18,155 @@ export type WorkItem = {
 
 const MUTATING = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit"]);
 
-// "user" messages the transcript stores that you never actually typed
-// (injected skill/tool/system text, or the harness's continuation nudge).
-const INJECTION = [
-  /^Base directory for this skill/,
-  /^<command-/,
-  /^Caveat:/i,
-  /system-reminder/i,
-  /^\[Request interrupted/,
-  /^Result of calling/,
-  /^The user (opened|approved|rejected|selected)/,
-  /^API Error/,
-  /^Continue from where you left off/i,
-];
-
-// Commands worth surfacing even when a turn changed no files (e.g. "merge to main").
+// Commands worth surfacing on the "Project setup" card.
 const SIGNIFICANT_CMD =
   /\b(git\s+(commit|push|merge|rebase|tag)|npm\s+(install|i|ci)|npx\s+create-|prisma\s+migrate|npm\s+run\s+(build|test|lint)|yarn\s+\w|pnpm\s+(install|add))/;
 
-function isRealPrompt(text: string | null | undefined): text is string {
-  if (!text) return false;
-  const t = text.trim();
-  if (!t || t.length > 1500) return false;
-  return !INJECTION.some((re) => re.test(t));
+// Feature areas, in board display order.
+const AREAS = [
+  "Project setup",
+  "Data layer & libs",
+  "API routes",
+  "Board UI",
+  "Docs",
+  "Other",
+] as const;
+type Area = (typeof AREAS)[number];
+
+const CONFIG_FILES = new Set([
+  "package.json",
+  "package-lock.json",
+  "pnpm-lock.yaml",
+  "yarn.lock",
+  "tsconfig.json",
+  "next.config.ts",
+  "next.config.js",
+  "next.config.mjs",
+  "eslint.config.mjs",
+  "eslint.config.js",
+  ".eslintrc.json",
+  "postcss.config.mjs",
+  "postcss.config.js",
+  "tailwind.config.ts",
+  "tailwind.config.js",
+  ".gitignore",
+  "next-env.d.ts",
+  "components.json",
+]);
+
+function classify(rel: string): Area {
+  const base = rel.split("/").pop() ?? rel;
+  if (CONFIG_FILES.has(base) || base.startsWith(".env")) return "Project setup";
+  if (rel.startsWith("src/lib/") || rel.startsWith("lib/")) return "Data layer & libs";
+  if (
+    rel.startsWith("src/app/api/") ||
+    rel.startsWith("app/api/") ||
+    rel.startsWith("pages/api/")
+  )
+    return "API routes";
+  if (rel.startsWith("src/components/") || rel.startsWith("components/")) return "Board UI";
+  if (rel.startsWith("src/app/") || rel.startsWith("app/")) return "Board UI";
+  if (base.endsWith(".md")) return "Docs";
+  return "Other";
 }
 
-function shorten(p: string, cwd: string | null): string {
-  if (cwd && p.startsWith(cwd + "/")) return p.slice(cwd.length + 1);
-  return p;
-}
-
-function actionLabel(created: number, edited: number, commands: number): string {
-  if (created) return `Created ${created} file${created > 1 ? "s" : ""}`;
-  if (edited) return `Edited ${edited} file${edited > 1 ? "s" : ""}`;
-  if (commands) return `Ran ${commands} command${commands > 1 ? "s" : ""}`;
-  return "Work item";
-}
-
-type Turn = {
-  prompt: string;
+type ProjectData = {
+  cwd: string;
   created: Set<string>;
   edited: Set<string>;
   commands: string[];
 };
 
-function parseSession(raw: string, sessionId: string): WorkItem[] {
-  const lines = raw.trim().split("\n");
-  let cwd: string | null = null;
-  const turns: Turn[] = [];
-  let cur: Turn | null = null;
-
-  const close = () => {
-    if (
-      cur &&
-      (cur.created.size > 0 ||
-        cur.edited.size > 0 ||
-        cur.commands.some((c) => SIGNIFICANT_CMD.test(c)))
-    ) {
-      turns.push(cur);
-    }
-    cur = null;
-  };
-
-  for (const line of lines) {
+function scanTranscript(raw: string, data: ProjectData): void {
+  for (const line of raw.trim().split("\n")) {
     let o: Record<string, unknown>;
     try {
       o = JSON.parse(line);
     } catch {
       continue;
     }
-    if (!cwd && typeof o.cwd === "string") cwd = o.cwd;
+    if (!data.cwd && typeof o.cwd === "string") data.cwd = o.cwd;
+    if (o.type !== "assistant") continue;
 
     const message = o.message as { content?: unknown } | undefined;
+    const content = message?.content;
+    if (!Array.isArray(content)) continue;
 
-    if (o.type === "user") {
-      const content = message?.content;
-      let text: string | null = null;
-      if (typeof content === "string") text = content;
-      else if (Array.isArray(content)) {
-        const tb = content.find(
-          (b) => b && typeof b === "object" && (b as { type?: string }).type === "text",
-        ) as { text?: string } | undefined;
-        if (tb?.text) text = tb.text; // ignore tool_result-only user messages
-      }
-      if (isRealPrompt(text)) {
-        close();
-        cur = { prompt: text.trim(), created: new Set(), edited: new Set(), commands: [] };
-      }
-    } else if (o.type === "assistant" && cur) {
-      const content = message?.content;
-      if (!Array.isArray(content)) continue;
-      for (const b of content) {
-        if (!b || typeof b !== "object") continue;
-        const block = b as { type?: string; name?: string; input?: Record<string, unknown> };
-        if (block.type !== "tool_use") continue;
-        const inp = block.input ?? {};
-        if (block.name === "Write" && typeof inp.file_path === "string") {
-          cur.created.add(inp.file_path);
-        } else if (MUTATING.has(block.name ?? "")) {
-          const fp = (inp.file_path ?? inp.notebook_path) as string | undefined;
-          if (typeof fp === "string") cur.edited.add(fp);
-        } else if (block.name === "Bash" && typeof inp.command === "string") {
-          cur.commands.push(inp.command);
-        }
+    for (const b of content) {
+      if (!b || typeof b !== "object") continue;
+      const block = b as { type?: string; name?: string; input?: Record<string, unknown> };
+      if (block.type !== "tool_use") continue;
+      const inp = block.input ?? {};
+      if (block.name === "Write" && typeof inp.file_path === "string") {
+        data.created.add(inp.file_path);
+      } else if (MUTATING.has(block.name ?? "")) {
+        const fp = (inp.file_path ?? inp.notebook_path) as string | undefined;
+        if (typeof fp === "string") data.edited.add(fp);
+      } else if (block.name === "Bash" && typeof inp.command === "string") {
+        data.commands.push(inp.command);
       }
     }
   }
-  close();
+}
 
-  return turns.map((t, i): WorkItem => {
-    const created = [...t.created];
-    const edited = [...t.edited].filter((f) => !t.created.has(f));
-    const cmds = dedupe(
-      t.commands.map((c) => c.split("\n")[0].trim().slice(0, 80)).filter(Boolean),
-    ).slice(0, 6);
+function buildItems(data: ProjectData, multiProject: boolean): WorkItem[] {
+  const { cwd } = data;
+  if (!cwd) return []; // can't compute project-relative paths without a cwd
 
-    const firstLine = (t.prompt.split("\n").find((l) => l.trim()) ?? "").trim();
-    const title = firstLine.slice(0, 80) || actionLabel(created.length, edited.length, cmds.length);
+  // Bucket project-relative files by area (files outside the project are skipped).
+  const buckets = new Map<Area, { created: string[]; edited: string[] }>();
+  const rel = (f: string): string | null =>
+    f.startsWith(cwd + "/") ? f.slice(cwd.length + 1) : null;
+  const add = (f: string, kind: "created" | "edited") => {
+    const r = rel(f);
+    if (!r) return;
+    const area = classify(r);
+    if (!buckets.has(area)) buckets.set(area, { created: [], edited: [] });
+    buckets.get(area)![kind].push(r);
+  };
+  data.created.forEach((f) => add(f, "created"));
+  data.edited.forEach((f) => {
+    if (!data.created.has(f)) add(f, "edited");
+  });
+
+  const sigCmds = [
+    ...new Set(
+      data.commands
+        .map((c) => c.split("\n")[0].trim())
+        .filter((c) => SIGNIFICANT_CMD.test(c)),
+    ),
+  ].slice(0, 6);
+
+  const projName = path.basename(cwd) || cwd;
+  const items: WorkItem[] = [];
+
+  for (const area of AREAS) {
+    const b = buckets.get(area);
+    if (!b || (b.created.length === 0 && b.edited.length === 0)) continue;
 
     const parts: string[] = [];
-    if (created.length) parts.push(`created ${created.length}`);
-    if (edited.length) parts.push(`edited ${edited.length}`);
-    if (cmds.length) parts.push(`${cmds.length} command${cmds.length > 1 ? "s" : ""}`);
-    const body = parts.length ? `Files ${parts.join(", ")}.` : "Work item.";
+    if (b.created.length) parts.push(`${b.created.length} created`);
+    if (b.edited.length) parts.push(`${b.edited.length} edited`);
 
-    const detailLines: string[] = [];
-    if (cwd) detailLines.push(`Project: ${cwd}`);
-    if (created.length) detailLines.push(`Created: ${created.map((f) => shorten(f, cwd)).join(", ")}`);
-    if (edited.length) detailLines.push(`Edited: ${edited.map((f) => shorten(f, cwd)).join(", ")}`);
-    if (cmds.length) detailLines.push(`Ran:\n${cmds.map((c) => `  • ${c}`).join("\n")}`);
+    const detail: string[] = [];
+    if (b.created.length) detail.push(`Created: ${[...b.created].sort().join(", ")}`);
+    if (b.edited.length) detail.push(`Edited: ${[...b.edited].sort().join(", ")}`);
+    if (area === "Project setup" && sigCmds.length) {
+      detail.push(`Key commands:\n${sigCmds.map((c) => `  • ${c.slice(0, 80)}`).join("\n")}`);
+    }
 
-    return {
-      sourceKey: `${sessionId}#${i}`,
-      title,
-      body,
-      details: detailLines.join("\n"),
-      project: cwd ?? "",
-    };
-  });
+    items.push({
+      sourceKey: `${cwd}::${area}`,
+      title: multiProject ? `${projName}: ${area}` : area,
+      body: `${parts.join(", ")} in ${projName}.`,
+      details: detail.join("\n"),
+      project: cwd,
+    });
+  }
+  return items;
 }
 
-function dedupe(items: string[]): string[] {
-  return [...new Set(items)];
-}
-
-/** Scan every Claude Code project on this machine and return all work items. */
+/** Scan every Claude Code project on this machine and return feature-area work items. */
 export async function readClaudeCodeWorkItems(): Promise<WorkItem[]> {
   const projectsDir = path.join(os.homedir(), ".claude", "projects");
   let projectDirs: string[];
@@ -172,7 +176,7 @@ export async function readClaudeCodeWorkItems(): Promise<WorkItem[]> {
     return []; // no Claude Code history on this machine
   }
 
-  const items: WorkItem[] = [];
+  const projects: ProjectData[] = [];
   for (const proj of projectDirs) {
     const dir = path.join(projectsDir, proj);
     let files: string[];
@@ -183,14 +187,19 @@ export async function readClaudeCodeWorkItems(): Promise<WorkItem[]> {
     } catch {
       continue;
     }
+    const data: ProjectData = { cwd: "", created: new Set(), edited: new Set(), commands: [] };
     for (const file of files) {
       try {
-        const raw = await fs.readFile(path.join(dir, file), "utf8");
-        items.push(...parseSession(raw, path.basename(file, ".jsonl")));
+        scanTranscript(await fs.readFile(path.join(dir, file), "utf8"), data);
       } catch {
         // skip unreadable/partial transcript
       }
     }
+    if (data.cwd && (data.created.size > 0 || data.edited.size > 0)) {
+      projects.push(data);
+    }
   }
-  return items;
+
+  const multiProject = projects.length > 1;
+  return projects.flatMap((p) => buildItems(p, multiProject));
 }

@@ -90,12 +90,13 @@ Claude Code's local transcripts and adds it to the board — **no API key, fully
 offline**.
 
 - Reads `~/.claude/projects/*/*.jsonl` (every Claude Code project on the machine).
-- Groups the assistant's file edits and meaningful commands under the human prompt
-  that triggered them, producing one card per **work item**.
-- Filters out non-human "user" messages (injected skill/tool text and the harness's
-  "Continue from where you left off" nudges) so titles reflect what you actually asked.
+- Collects every file the assistant created/edited across a project and buckets them
+  into logical **feature areas** — _Project setup, Data layer & libs, API routes,
+  Board UI, Docs, Other_ — producing one tidy card per area (each listing its files,
+  plus key setup commands on the "Project setup" card).
 - Adds cards to **Done** (it's already-completed work) and **dedupes** on re-import
-  via a stable `sourceKey`, so clicking it again won't create duplicates.
+  via a stable `sourceKey` (`<project>::<area>`), so clicking it again won't duplicate.
+- With multiple projects, card titles are prefixed with the project name.
 
 It reflects history on whatever machine runs the app, so run it locally to see your
 real work. Parsing logic lives in `src/lib/claudeCode.ts`.
