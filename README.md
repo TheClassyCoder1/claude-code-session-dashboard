@@ -15,16 +15,24 @@ It has two parts:
 
 ```
 Claude Code session
-   │  Stop hook (every turn)      → cheap capture: files, tokens, commands, prompts
-   │  SessionEnd hook (once)      → `claude -p` writes the narrative + its own cost
+   │  SessionStart hook           → seeds a "To do" record (started, not picked up)
+   │  Stop hook (every turn)      → "In progress": files, tokens, commands, prompts
+   │  SessionEnd hook (once)      → "Done": `claude -p` writes the narrative + its cost
    ▼
 ~/.claude/feature-log/<project>/<session>.json
    ▼
-Next.js dashboard  (reads the JSON, groups by project, shows tokens + est. cost)
+Next.js dashboard  (groups by status, shows iterations, changes, tokens + est. cost)
 ```
 
-Token counts come straight from the transcript's `usage` data (zero LLM cost); the
-end-of-session summary is the only LLM call, and it's bounded by a compact prompt.
+Each record carries a lifecycle **status**, derived on read:
+
+- **To do** — session started but no work captured yet (0 iterations, 0 changes).
+- **In progress** — has activity but no end-of-session summary yet.
+- **Done** — finished, with a Claude-written summary.
+
+The dashboard groups records into these three sections with badges. Token counts come
+straight from the transcript's `usage` data (zero LLM cost); the end-of-session summary
+is the only LLM call, and it's bounded by a compact prompt.
 
 ## Setup
 
@@ -34,8 +42,8 @@ end-of-session summary is the only LLM call, and it's bounded by a compact promp
 node tools/feature-logger/install.mjs
 ```
 
-This copies the logger to `~/.claude/feature-logger/` and merges `Stop` + `SessionEnd`
-hooks into `~/.claude/settings.json` (it backs up first and never touches the managed
+This copies the logger to `~/.claude/feature-logger/` and merges `SessionStart` +
+`Stop` + `SessionEnd` hooks into `~/.claude/settings.json` (it backs up first and never touches the managed
 `launcher-settings.json`). Start a **new** Claude Code session for the hooks to load.
 See `tools/feature-logger/README.md` for manual install and testing.
 

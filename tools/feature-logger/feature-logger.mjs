@@ -184,6 +184,22 @@ function parseTranscript(transcriptPath, fallbackCwd) {
   };
 }
 
+function emptyBase(cwd) {
+  const ts = new Date().toISOString();
+  return {
+    projectPath: cwd,
+    projectName: cwd ? path.basename(cwd) : "unknown",
+    model: "claude-opus-4-8",
+    tokens: { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 },
+    turns: 0,
+    filesByArea: {},
+    commands: [],
+    userPrompts: [],
+    startedAt: ts,
+    endedAt: ts,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Persistence (atomic, idempotent per session_id)
 // ---------------------------------------------------------------------------
@@ -307,9 +323,18 @@ function main() {
   const event = input.hook_event_name || "Stop";
   const sessionId = input.session_id;
   const transcriptPath = input.transcript_path;
-  if (!sessionId || !transcriptPath || !fs.existsSync(transcriptPath)) return;
+  if (!sessionId) return;
 
-  const base = parseTranscript(transcriptPath, input.cwd);
+  // At SessionStart the transcript may be empty/absent — still seed a "to do"
+  // record so the dashboard shows the session as started-but-not-picked-up.
+  let base;
+  if (transcriptPath && fs.existsSync(transcriptPath)) {
+    base = parseTranscript(transcriptPath, input.cwd);
+  } else if (event === "SessionStart" && input.cwd) {
+    base = emptyBase(input.cwd);
+  } else {
+    return;
+  }
   const file = recordPath(sessionId, base.projectPath);
   const existing = readExisting(file) || {};
 
