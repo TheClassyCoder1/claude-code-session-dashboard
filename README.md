@@ -35,24 +35,31 @@ It has two parts:
 
 ```
 Claude Code session
-   │  SessionStart hook       → seeds a "To do" record (started, not picked up)
-   │  Stop hook (every turn)  → "In progress": files, tokens, commands, prompts
-   │  SessionEnd hook (once)  → "Done": `claude -p` writes the narrative + its cost
+   │  SessionStart      → seeds a "To do" record (started, not picked up)
+   │  UserPromptSubmit  → "In progress" (clears any waiting state)
+   │  Stop (every turn) → records files, tokens, commands, prompts;
+   │                       marks "Finished — waiting for input"
+   │  Notification      → "Waiting for you" when Claude needs a permission accepted
+   │  PostToolUse       → clears "Waiting for you" once the tool runs (accepted)
+   │  SessionEnd (once) → "Done": `claude -p` writes the narrative + its cost
    ▼
 ~/.claude/feature-log/<project>/<session>.json
    ▼
-Next.js dashboard  (groups by status — iterations, changes, tokens + est. cost)
+Next.js dashboard  (groups by status; polls every 3s for near-live updates)
 ```
 
 Each record carries a lifecycle **status**, derived on read:
 
 | Badge | Meaning |
 | ----- | ------- |
-| 🔵 **To do** | Session started, no work captured yet (0 iterations, 0 changes). |
-| 🟡 **In progress** | Has activity, but no end-of-session summary yet. |
-| 🟢 **Done** | Finished, with a Claude-written summary. |
+| ⚪ **To do** | Session started, no work captured yet (0 iterations, 0 changes). |
+| 🟡 **Waiting for you** | Claude is paused on a permission prompt — needs you to accept. |
+| 🔵 **In progress** | Actively being worked on. |
+| 🩵 **Finished — waiting for input** | Claude ended its turn; waiting for your next message. |
+| 🟢 **Done** | Finished, with a Claude-written summary (session ended). |
 
-Token counts come straight from the transcript's `usage` data (zero LLM cost). The
+The waiting/finished states are driven live by Claude Code hooks and the dashboard's 3s
+poll. Token counts come straight from the transcript's `usage` data (zero LLM cost). The
 end-of-session summary is the **only** LLM call, bounded by a compact prompt.
 
 ## 🚀 Setup
@@ -63,11 +70,15 @@ end-of-session summary is the **only** LLM call, bounded by a compact prompt.
 node tools/feature-logger/install.mjs
 ```
 
-Copies the logger to `~/.claude/feature-logger/` and merges `SessionStart` + `Stop` +
-`SessionEnd` hooks into `~/.claude/settings.json` (backs up first, never touches the
-managed `launcher-settings.json`). **Start a new Claude Code session** for the hooks to
-load. See [`tools/feature-logger/README.md`](tools/feature-logger/README.md) for manual
-install + testing.
+Copies the logger to `~/.claude/feature-logger/` and merges the `SessionStart`,
+`UserPromptSubmit`, `Notification`, `PostToolUse`, `Stop`, and `SessionEnd` hooks into
+`~/.claude/settings.json` (backs up first, never touches the managed
+`launcher-settings.json`). **Start a new Claude Code session** for the hooks to load.
+
+Re-run any time to update — `npm run hooks` (or the command above) re-copies the latest
+script, adds new hook events, and prunes ones it no longer uses, leaving other tools'
+hooks untouched. See [`tools/feature-logger/README.md`](tools/feature-logger/README.md)
+for manual install + testing.
 
 ### 2. Run the dashboard
 
@@ -91,13 +102,14 @@ session (with the hook installed) and refresh.
 | `npm run start` | Serve the production build |
 | `npm run lint` | Run ESLint |
 | `npm test` | Run unit tests (`node --test`) |
+| `npm run hooks` | Install/update the feature-logger hooks in `~/.claude/settings.json` |
 
 ## 🗂️ Project layout
 
 ```
 tools/feature-logger/
-  feature-logger.mjs   # standalone Stop + SessionEnd hook (no deps)
-  install.mjs          # safe, idempotent global installer
+  feature-logger.mjs   # standalone hook (no deps) — lifecycle + live status
+  install.mjs          # safe, idempotent installer/updater (adds + prunes hooks)
   uninstall.mjs        # reverses install.mjs (backs up settings.json)
   README.md            # hook docs + manual install + testing
 src/
