@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🗂️ Claude Code Session Summarizer
+# 🗂️ Claude Session Dashboard
 
 **A local dashboard that shows _what you built with Claude Code_ — per work session.**
 
