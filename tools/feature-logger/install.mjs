@@ -20,8 +20,13 @@ const claudeDir = path.join(os.homedir(), ".claude");
 const settingsPath = path.join(claudeDir, "settings.json");
 // The commands Claude Code will run. ~ is expanded by Claude Code.
 const HOOK_COMMAND = "~/.claude/feature-logger/feature-logger.mjs";
-const AG_COMMAND = "~/.claude/approval-gate/approval-gate.mjs";
-const PR_COMMAND = "~/.claude/prompt-relay/prompt-relay.mjs";
+const DASHBOARD_COMMAND = "~/.claude/dashboard-hook/dashboard-hook.mjs";
+
+// Commands from earlier versions to remove from settings on (re)install.
+export const RETIRED_COMMANDS = [
+  "~/.claude/approval-gate/approval-gate.mjs",
+  "~/.claude/prompt-relay/prompt-relay.mjs",
+];
 
 export const HOOK_EVENTS = [
   "SessionStart",
@@ -44,18 +49,11 @@ export const INSTALLS = [
     dest: path.join(claudeDir, "feature-logger", "feature-logger.mjs"),
   },
   {
-    command: AG_COMMAND,
-    events: ["PreToolUse"],
+    command: DASHBOARD_COMMAND,
+    events: ["PreToolUse", "Stop"],
     timeout: 600,
-    src: "approval-gate/approval-gate.mjs",
-    dest: path.join(claudeDir, "approval-gate", "approval-gate.mjs"),
-  },
-  {
-    command: PR_COMMAND,
-    events: ["Stop"],
-    timeout: 600,
-    src: "prompt-relay/prompt-relay.mjs",
-    dest: path.join(claudeDir, "prompt-relay", "prompt-relay.mjs"),
+    src: "dashboard-hook/dashboard-hook.mjs",
+    dest: path.join(claudeDir, "dashboard-hook", "dashboard-hook.mjs"),
   },
 ];
 
@@ -163,6 +161,14 @@ function main() {
     for (const event of pruneStaleHooks(settings.hooks, inst.command, inst.events)) {
       changed = true;
       log(`✓ ${event}: removed stale ${inst.command}`);
+    }
+  }
+
+  // 3b. Remove commands from retired versions (empty keep-set → prune everywhere).
+  for (const cmd of RETIRED_COMMANDS) {
+    for (const event of pruneStaleHooks(settings.hooks, cmd, [])) {
+      changed = true;
+      log(`✓ ${event}: removed retired ${cmd}`);
     }
   }
 

@@ -49,16 +49,19 @@ Re-run it (or `npm run hooks`) to **update**: it always re-copies the latest scr
 any new hook events, and prunes events it no longer registers — other tools' hooks are
 left intact.
 
-The same installer also copies `tools/approval-gate/approval-gate.mjs` and registers it
-on `PreToolUse`. That hook only acts in **Dashboard mode** (the `~/.claude/feature-log/mode.json`
-flag, default `cli` = no-op); in Dashboard mode it routes gated-tool permission prompts to
-the dashboard, falling back to the terminal prompt on timeout.
+The same installer also copies `tools/dashboard-hook/dashboard-hook.mjs` and registers it
+on both `PreToolUse` and `Stop` (`timeout: 600`; feature-logger stays `60`). One blocking
+hook, two flows, active only in **Dashboard mode** (the `~/.claude/feature-log/mode.json`
+flag, default `cli` = no-op):
 
-It also copies `tools/prompt-relay/prompt-relay.mjs` and registers it on `Stop`. In
-Dashboard mode it blocks a finished turn up to the configured window (`relayWindowMs` in
-`mode.json`) waiting for a dashboard-sent prompt, returning it as a continuation; on
-timeout the session stops normally. Blocking hooks (approval-gate, prompt-relay) register
-`timeout: 600`; feature-logger stays `60`.
+- **`PreToolUse`** → routes gated-tool permission prompts to the dashboard, falling back to
+  the terminal prompt on timeout.
+- **`Stop`** → blocks a finished turn up to the configured window (`relayWindowMs` in
+  `mode.json`) waiting for a dashboard-sent prompt, returning it as a continuation; on
+  timeout the session stops normally.
+
+Re-running the installer also removes the retired split hooks (`approval-gate.mjs`,
+`prompt-relay.mjs`) from `settings.json`.
 
 ## Manual install
 

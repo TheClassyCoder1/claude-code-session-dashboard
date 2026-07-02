@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { HOOK_EVENTS, pruneStaleHooks, INSTALLS, refreshTimeout } from "./install.mjs";
+import { HOOK_EVENTS, pruneStaleHooks, INSTALLS, refreshTimeout, RETIRED_COMMANDS } from "./install.mjs";
 
 const CMD = "~/.claude/feature-logger/feature-logger.mjs";
 const ours = () => ({ matcher: "", hooks: [{ type: "command", command: CMD }] });
@@ -28,30 +28,27 @@ test("pruneStaleHooks preserves other tools' hooks on a stale event", () => {
   assert.deepEqual(hooks.PreToolUse, [other]); // only ours removed; event kept
 });
 
-test("INSTALLS registers feature-logger on its events and approval-gate on PreToolUse", () => {
+test("INSTALLS: feature-logger on its events (60s), dashboard-hook on PreToolUse+Stop (600s)", () => {
   const fl = INSTALLS.find((i) => i.command.includes("feature-logger"));
-  const ag = INSTALLS.find((i) => i.command.includes("approval-gate"));
+  const dh = INSTALLS.find((i) => i.command.includes("dashboard-hook"));
   assert.deepEqual([...fl.events].sort(), [...HOOK_EVENTS].sort());
-  assert.deepEqual(ag.events, ["PreToolUse"]);
+  assert.equal(fl.timeout, 60);
+  assert.deepEqual([...dh.events].sort(), ["PreToolUse", "Stop"]);
+  assert.equal(dh.timeout, 600);
 });
 
-test("INSTALLS: prompt-relay on Stop, blocking hooks at timeout 600", () => {
-  const fl = INSTALLS.find((i) => i.command.includes("feature-logger"));
-  const ag = INSTALLS.find((i) => i.command.includes("approval-gate"));
-  const pr = INSTALLS.find((i) => i.command.includes("prompt-relay"));
-  assert.equal(fl.timeout, 60);
-  assert.equal(ag.timeout, 600);
-  assert.deepEqual(pr.events, ["Stop"]);
-  assert.equal(pr.timeout, 600);
+test("RETIRED_COMMANDS lists the old split hook scripts", () => {
+  assert.ok(RETIRED_COMMANDS.some((c) => c.includes("approval-gate")));
+  assert.ok(RETIRED_COMMANDS.some((c) => c.includes("prompt-relay")));
 });
 
 test("refreshTimeout upgrades a stale 60s entry to 600s", () => {
-  const AG = "~/.claude/approval-gate/approval-gate.mjs";
-  const arr = [{ matcher: "", hooks: [{ type: "command", command: AG, timeout: 60 }] }];
-  const changed = refreshTimeout(arr, AG, 600);
+  const DH = "~/.claude/dashboard-hook/dashboard-hook.mjs";
+  const arr = [{ matcher: "", hooks: [{ type: "command", command: DH, timeout: 60 }] }];
+  const changed = refreshTimeout(arr, DH, 600);
   assert.equal(changed, true);
   assert.equal(arr[0].hooks[0].timeout, 600);
-  assert.equal(refreshTimeout(arr, AG, 600), false);
+  assert.equal(refreshTimeout(arr, DH, 600), false);
 });
 
 test("pruning per-command leaves the other command's hook intact", () => {

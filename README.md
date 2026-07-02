@@ -71,8 +71,8 @@ Don't answer within ~5 minutes and it falls back to the normal terminal prompt.
 **CLI mode** (the default) changes nothing — answer in the terminal as usual.
 
 Only one surface is live at a time: while Dashboard mode waits for your click the
-terminal isn't prompting yet; on timeout it hands back to the terminal. Powered by a
-second hook, `tools/approval-gate/approval-gate.mjs`, installed by `npm run hooks`.
+terminal isn't prompting yet; on timeout it hands back to the terminal. Powered by
+`tools/dashboard-hook/dashboard-hook.mjs` (on `PreToolUse`), installed by `npm run hooks`.
 
 ### Sending a prompt from the dashboard
 
@@ -84,8 +84,8 @@ waits for an approval (1–10 min; 10 is Claude's hook ceiling). You can only se
 within that window — once it lapses, control falls back (idle for prompts, terminal
 prompt for approvals).
 
-Powered by a third hook, `tools/prompt-relay/prompt-relay.mjs` (a `Stop` hook),
-installed by `npm run hooks`.
+Powered by the same `tools/dashboard-hook/dashboard-hook.mjs` (on `Stop`), installed by
+`npm run hooks` — one hook handles both approvals (PreToolUse) and prompts (Stop).
 
 ## 🚀 Setup
 
@@ -137,10 +137,8 @@ tools/feature-logger/
   install.mjs          # installer/updater for BOTH hooks (adds + prunes)
   uninstall.mjs        # reverses install.mjs (backs up settings.json)
   README.md            # hook docs + manual install + testing
-tools/approval-gate/
-  approval-gate.mjs    # PreToolUse hook — routes gated approvals to the dashboard
-tools/prompt-relay/
-  prompt-relay.mjs     # Stop hook — sends dashboard prompts into a session
+tools/dashboard-hook/
+  dashboard-hook.mjs   # blocking hook — approvals (PreToolUse) + prompt relay (Stop)
 src/
   app/page.tsx         # server: reads feature log + mode + pending + awaiting → <FeatureDashboard>
   app/layout.tsx
