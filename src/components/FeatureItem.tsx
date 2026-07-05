@@ -5,6 +5,7 @@ import {
   type FeatureRecord,
 } from "@/lib/featureTypes";
 import { formatDate, formatTokens, formatUsd, shortModel } from "@/lib/format";
+import CopyCommand from "./CopyCommand";
 
 function TokenStat({ label, value }: { label: string; value: number }) {
   return (
@@ -71,6 +72,15 @@ export default function FeatureItem({ record }: { record: FeatureRecord }) {
 
       <div className="border-t border-slate-100 p-4 pt-3">
         <p className="mb-3 text-xs italic text-slate-400">{meta.description}</p>
+
+        <div className="mb-4">
+          <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">
+            Resume this session
+          </h4>
+          <CopyCommand
+            command={`cd ${record.projectPath} && claude --resume ${record.sessionId}`}
+          />
+        </div>
 
         {status === "done" && narrativeBody ? (
           <p className="mb-4 whitespace-pre-wrap text-sm leading-relaxed text-slate-700">
