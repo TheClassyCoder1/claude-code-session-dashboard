@@ -1,6 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { deriveStatus, countChanges, aggregate, STATUS_META, type FeatureRecord } from "./featureTypes.ts";
+import {
+  deriveStatus,
+  countChanges,
+  aggregate,
+  dailyRollup,
+  matchesQuery,
+  exportMarkdown,
+  STATUS_META,
+  type FeatureRecord,
+} from "./featureTypes.ts";
 
 function rec(over: Partial<FeatureRecord> = {}): FeatureRecord {
   return {
@@ -75,6 +84,67 @@ test("countChanges sums created and edited across areas", () => {
     },
   });
   assert.equal(countChanges(r), 3);
+});
+
+test("dailyRollup buckets cost/tokens/sessions per day over the window", () => {
+  const now = Date.parse("2026-07-06T12:00:00Z");
+  const days = dailyRollup(
+    [
+      rec({ endedAt: "2026-07-06T09:00:00Z", estimatedCostUsd: 1, tokens: { input: 0, output: 100, cacheRead: 0, cacheCreation: 0 } }),
+      rec({ endedAt: "2026-07-06T10:00:00Z", estimatedCostUsd: 0.5, tokens: { input: 0, output: 50, cacheRead: 0, cacheCreation: 0 } }),
+      rec({ endedAt: "2026-07-01T10:00:00Z", estimatedCostUsd: 2, tokens: { input: 0, output: 10, cacheRead: 0, cacheCreation: 0 } }),
+      rec({ endedAt: "2020-01-01T00:00:00Z", estimatedCostUsd: 99, tokens: { input: 0, output: 9, cacheRead: 0, cacheCreation: 0 } }), // outside window
+    ],
+    7,
+    now,
+  );
+  assert.equal(days.length, 7);
+  assert.equal(days[6].day, "2026-07-06");
+  assert.equal(days[6].costUsd, 1.5);
+  assert.equal(days[6].outputTokens, 150);
+  assert.equal(days[6].sessions, 2);
+  assert.equal(days[1].day, "2026-07-01");
+  assert.equal(days[1].costUsd, 2);
+  assert.equal(days[0].sessions, 0); // empty day present
+});
+
+test("matchesQuery searches headline, summary, prompts, project, session id", () => {
+  const r = rec({
+    summaryHeadline: "Built kanban board",
+    summary: "Added drag and drop",
+    userPrompts: ["make it fancy"],
+    projectName: "claude-kanban",
+    sessionId: "abc-123",
+  });
+  assert.equal(matchesQuery(r, ""), true);
+  assert.equal(matchesQuery(r, "KANBAN"), true);
+  assert.equal(matchesQuery(r, "drag"), true);
+  assert.equal(matchesQuery(r, "fancy"), true);
+  assert.equal(matchesQuery(r, "abc-123"), true);
+  assert.equal(matchesQuery(r, "nonexistent"), false);
+});
+
+test("exportMarkdown renders a standup-style day summary", () => {
+  const md = exportMarkdown(
+    [
+      rec({
+        endedAt: "2026-07-06T09:00:00Z",
+        projectName: "proj-a",
+        summaryHeadline: "Built the thing",
+        estimatedCostUsd: 1.25,
+        tokens: { input: 0, output: 100, cacheRead: 0, cacheCreation: 0 },
+      }),
+      rec({ endedAt: "2026-07-05T09:00:00Z", summaryHeadline: "Yesterday's work" }), // other day
+      rec({ endedAt: "2026-07-06T11:00:00Z", projectName: "proj-a", userPrompts: ["fix the bug"] }),
+    ],
+    "2026-07-06",
+  );
+  assert.match(md, /^# Claude sessions — 2026-07-06/);
+  assert.match(md, /## proj-a/);
+  assert.match(md, /- Built the thing/);
+  assert.match(md, /- fix the bug/); // falls back to first prompt
+  assert.doesNotMatch(md, /Yesterday's work/);
+  assert.match(md, /\$1\.25/);
 });
 
 test("aggregate rolls up counts, distinct projects, tokens and cost", () => {

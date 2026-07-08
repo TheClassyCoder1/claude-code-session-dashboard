@@ -5,6 +5,7 @@ import {
   aggregate,
   deriveStatus,
   groupRecords,
+  matchesQuery,
   STATUS_META,
   type FeatureRecord,
   type Status,
@@ -13,6 +14,8 @@ import {
 import { formatTokens, formatUsd } from "@/lib/format";
 import type { PendingApproval, AwaitingPrompt } from "@/lib/approvals";
 import StatsHeader from "./StatsHeader";
+import Heatmap from "./Heatmap";
+import ExportButton from "./ExportButton";
 import FeatureItem from "./FeatureItem";
 import PendingApprovalCard from "./PendingApproval";
 import SendPrompt from "./SendPrompt";
@@ -28,6 +31,7 @@ const VIEWS: { id: ViewBy; label: string }[] = [
 
 type PendingMap = Record<string, PendingApproval>;
 type AwaitingMap = Record<string, AwaitingPrompt>;
+type TailMap = Record<string, string>;
 
 // A record card plus, if the session is paused on a permission prompt, its
 // Approve/Deny panel; or, if it finished a turn and is awaiting input in
@@ -36,10 +40,12 @@ function RecordCard({
   record,
   pending,
   awaiting,
+  tail,
 }: {
   record: FeatureRecord;
   pending?: PendingApproval;
   awaiting?: AwaitingPrompt;
+  tail?: string;
 }) {
   const label =
     record.summaryHeadline?.trim() ||
@@ -47,7 +53,7 @@ function RecordCard({
     `${record.projectName} · ${record.sessionId.slice(0, 8)}`;
   return (
     <div>
-      <FeatureItem record={record} />
+      <FeatureItem record={record} liveTail={tail} />
       {pending && <PendingApprovalCard pending={pending} label={label} />}
       {awaiting && !pending && (
         <SendPrompt sessionId={record.sessionId} label={label} lastReply={awaiting.lastReply} />
@@ -60,10 +66,12 @@ function StatusSections({
   records,
   pendingBySession,
   awaitingBySession,
+  tailBySession,
 }: {
   records: FeatureRecord[];
   pendingBySession: PendingMap;
   awaitingBySession: AwaitingMap;
+  tailBySession: TailMap;
 }) {
   const groups = Object.fromEntries(
     SECTION_ORDER.map((s) => [s, [] as FeatureRecord[]]),
@@ -91,6 +99,7 @@ function StatusSections({
                   record={r}
                   pending={pendingBySession[r.sessionId]}
                   awaiting={awaitingBySession[r.sessionId]}
+                  tail={tailBySession[r.sessionId]}
                 />
               ))}
             </div>
@@ -106,26 +115,33 @@ function GroupedView({
   by,
   pendingBySession,
   awaitingBySession,
+  tailBySession,
 }: {
   records: FeatureRecord[];
   by: "session" | "project";
   pendingBySession: PendingMap;
   awaitingBySession: AwaitingMap;
+  tailBySession: TailMap;
 }) {
   const groups = useMemo(() => groupRecords(records, by), [records, by]);
   return (
     <div className="space-y-6">
       {groups.map((g) => (
-        <section key={g.key}>
-          <div className="mb-2 flex items-center justify-between gap-2">
-            <div className="min-w-0">
-              <h2 className="truncate text-sm font-semibold text-slate-700">{g.title}</h2>
-              <p className="truncate text-xs text-slate-500">{g.subtitle}</p>
+        <details key={g.key} open className="group/section">
+          <summary className="mb-2 flex cursor-pointer list-none items-center justify-between gap-2">
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="text-slate-300 transition-transform group-open/section:rotate-90">
+                ▶
+              </span>
+              <div className="min-w-0">
+                <h2 className="truncate text-sm font-semibold text-slate-700">{g.title}</h2>
+                <p className="truncate text-xs text-slate-500">{g.subtitle}</p>
+              </div>
             </div>
             <div className="shrink-0 text-right text-xs text-slate-500">
               {formatTokens(g.totalOutputTokens)} out · {formatUsd(g.totalCostUsd)}
             </div>
-          </div>
+          </summary>
           <div className="space-y-3">
             {g.records.map((r) => (
               <RecordCard
@@ -133,10 +149,11 @@ function GroupedView({
                 record={r}
                 pending={pendingBySession[r.sessionId]}
                 awaiting={awaitingBySession[r.sessionId]}
+                tail={tailBySession[r.sessionId]}
               />
             ))}
           </div>
-        </section>
+        </details>
       ))}
     </div>
   );
@@ -146,10 +163,12 @@ export default function FeatureDashboard({
   records,
   pendingBySession = {},
   awaitingBySession = {},
+  tailBySession = {},
 }: {
   records: FeatureRecord[];
   pendingBySession?: PendingMap;
   awaitingBySession?: AwaitingMap;
+  tailBySession?: TailMap;
 }) {
   const projects = useMemo(
     () => [...new Set(records.map((r) => r.projectName))].sort(),
@@ -157,10 +176,14 @@ export default function FeatureDashboard({
   );
   const [project, setProject] = useState<string>("all");
   const [view, setView] = useState<ViewBy>("feature");
+  const [query, setQuery] = useState("");
 
   const filtered = useMemo(
-    () => (project === "all" ? records : records.filter((r) => r.projectName === project)),
-    [records, project],
+    () =>
+      records
+        .filter((r) => project === "all" || r.projectName === project)
+        .filter((r) => matchesQuery(r, query)),
+    [records, project, query],
   );
   const stats = useMemo(() => aggregate(filtered), [filtered]);
 
@@ -181,6 +204,7 @@ export default function FeatureDashboard({
   return (
     <div>
       <StatsHeader stats={stats} />
+      <Heatmap records={filtered} />
 
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <div className="inline-flex rounded-md border border-slate-300 bg-white p-0.5">
@@ -199,6 +223,14 @@ export default function FeatureDashboard({
           ))}
         </div>
 
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search sessions…"
+          className="w-40 rounded border border-slate-300 bg-white px-2 py-1 text-sm focus:border-slate-500 focus:outline-none sm:w-52"
+        />
+        <ExportButton records={filtered} />
+
         {projects.length > 1 && (
           <div className="flex items-center gap-2">
             <label className="text-xs font-medium text-slate-500">Project</label>
@@ -207,7 +239,7 @@ export default function FeatureDashboard({
               onChange={(e) => setProject(e.target.value)}
               className="rounded border border-slate-300 bg-white px-2 py-1 text-sm focus:border-slate-500 focus:outline-none"
             >
-              <option value="all">All projects ({records.length})</option>
+              <option value="all">All projects</option>
               {projects.map((p) => (
                 <option key={p} value={p}>
                   {p}
@@ -219,17 +251,30 @@ export default function FeatureDashboard({
       </div>
 
       {view === "feature" ? (
-        <StatusSections
-          records={filtered}
-          pendingBySession={pendingBySession}
-          awaitingBySession={awaitingBySession}
-        />
+        project === "all" ? (
+          // All projects → one section per project, its sessions underneath.
+          <GroupedView
+            records={filtered}
+            by="project"
+            pendingBySession={pendingBySession}
+            awaitingBySession={awaitingBySession}
+            tailBySession={tailBySession}
+          />
+        ) : (
+          <StatusSections
+            records={filtered}
+            pendingBySession={pendingBySession}
+            awaitingBySession={awaitingBySession}
+            tailBySession={tailBySession}
+          />
+        )
       ) : (
         <GroupedView
           records={filtered}
           by={view}
           pendingBySession={pendingBySession}
           awaitingBySession={awaitingBySession}
+          tailBySession={tailBySession}
         />
       )}
     </div>

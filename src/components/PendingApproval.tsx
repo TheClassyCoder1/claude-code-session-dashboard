@@ -4,6 +4,10 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { PendingApproval } from "@/lib/approvals";
 
+const Spinner = () => (
+  <span className="h-3 w-3 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+);
+
 export default function PendingApprovalCard({
   pending,
   label,
@@ -14,6 +18,7 @@ export default function PendingApprovalCard({
   const router = useRouter();
   const [busy, setBusy] = useState<null | "allow" | "deny">(null);
   const [done, setDone] = useState<null | "allow" | "deny">(null);
+  const [remember, setRemember] = useState(false);
 
   const decide = async (decision: "allow" | "deny") => {
     if (busy) return;
@@ -21,7 +26,11 @@ export default function PendingApprovalCard({
     await fetch("/api/decision", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ sessionId: pending.sessionId, decision }),
+      body: JSON.stringify({
+        sessionId: pending.sessionId,
+        decision,
+        remember: decision === "allow" && remember,
+      }),
     });
     setDone(decision);
     router.refresh();
@@ -41,10 +50,6 @@ export default function PendingApprovalCard({
       </div>
     );
   }
-
-  const Spinner = () => (
-    <span className="h-3 w-3 animate-spin rounded-full border-2 border-white/40 border-t-white" />
-  );
 
   return (
     <div className="ml-4 mt-1 rounded-r-lg border-l-4 border-amber-400 bg-amber-50 p-3">
@@ -72,6 +77,15 @@ export default function PendingApprovalCard({
           {busy === "deny" && <Spinner />}
           {busy === "deny" ? "Denying…" : "Deny"}
         </button>
+        <label className="ml-1 flex items-center gap-1 text-[10px] text-amber-700">
+          <input
+            type="checkbox"
+            checked={remember}
+            onChange={(e) => setRemember(e.target.checked)}
+            className="h-3 w-3 accent-amber-600"
+          />
+          allow {pending.tool} for this session
+        </label>
       </div>
     </div>
   );

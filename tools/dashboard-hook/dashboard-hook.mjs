@@ -19,6 +19,7 @@ const BASE = path.join(os.homedir(), ".claude", "feature-log");
 const MODE_FILE = path.join(BASE, "mode.json");
 const PENDING_DIR = path.join(BASE, "pending");
 const DECISIONS_DIR = path.join(BASE, "decisions");
+const ALLOWED_DIR = path.join(BASE, "allowed");
 const AWAITING_DIR = path.join(BASE, "awaiting");
 const QUEUED_DIR = path.join(BASE, "queued");
 const WINDOW_MIN = 30_000;
@@ -93,10 +94,18 @@ export function lastAssistantText(transcriptPath) {
 function readControl() {
   try {
     const c = JSON.parse(fs.readFileSync(MODE_FILE, "utf8"));
-    return { mode: c.mode || "cli", relayWindowMs: c.relayWindowMs };
+    return { mode: c.mode || "cli", relayWindowMs: c.relayWindowMs, ntfyTopic: c.ntfyTopic };
   } catch {
-    return { mode: "cli", relayWindowMs: undefined };
+    return { mode: "cli", relayWindowMs: undefined, ntfyTopic: undefined };
   }
+}
+
+// Fire-and-forget push notification via ntfy (topic configured in the UI).
+// Never blocks or throws — a dead network must not affect the approval flow.
+function notify(topic, message) {
+  if (!topic || typeof topic !== "string") return;
+  const base = process.env.NTFY_BASE || "https://ntfy.sh";
+  fetch(`${base}/${topic}`, { method: "POST", body: message }).catch(() => {});
 }
 
 function writeAtomic(file, obj) {
@@ -140,30 +149,51 @@ async function poll(markerFile, windowMs, readValue) {
   }
 }
 
-async function handleApproval(input, windowMs) {
+function allowedTools(sid) {
+  try {
+    const t = JSON.parse(fs.readFileSync(path.join(ALLOWED_DIR, `${sid}.json`), "utf8")).tools;
+    return Array.isArray(t) ? t : [];
+  } catch {
+    return [];
+  }
+}
+
+async function handleApproval(input, windowMs, ntfyTopic) {
   const sid = input.session_id;
   const tool = input.tool_name;
   if (!GATED_TOOLS.has(tool)) return;
+  // "Approve + remember" from an earlier prompt in this session → instant allow.
+  if (allowedTools(sid).includes(tool)) {
+    process.stdout.write(JSON.stringify(decisionOutput("allow")));
+    return;
+  }
   const pendingFile = path.join(PENDING_DIR, `${sid}.json`);
   const decisionFile = path.join(DECISIONS_DIR, `${sid}.json`);
+  const summary = summarizeInput(tool, input.tool_input);
   writeAtomic(pendingFile, {
     sessionId: sid,
     tool,
-    input: summarizeInput(tool, input.tool_input),
+    input: summary,
     cwd: input.cwd || "",
     createdAt: new Date().toISOString(),
   });
-  const decision = await poll(pendingFile, windowMs, () => {
+  notify(ntfyTopic, `Waiting for you — approve ${tool}? ${summary}`);
+  const result = await poll(pendingFile, windowMs, () => {
     try {
-      const d = JSON.parse(fs.readFileSync(decisionFile, "utf8")).decision;
-      return d === "allow" || d === "deny" ? d : null;
+      const d = JSON.parse(fs.readFileSync(decisionFile, "utf8"));
+      return d.decision === "allow" || d.decision === "deny" ? d : null;
     } catch {
       return null;
     }
   });
-  if (decision) {
+  if (result) {
     rm(decisionFile);
-    process.stdout.write(JSON.stringify(decisionOutput(decision)));
+    if (result.decision === "allow" && result.remember === true) {
+      writeAtomic(path.join(ALLOWED_DIR, `${sid}.json`), {
+        tools: [...new Set([...allowedTools(sid), tool])],
+      });
+    }
+    process.stdout.write(JSON.stringify(decisionOutput(result.decision)));
   }
 }
 
@@ -199,10 +229,10 @@ async function main() {
     return;
   }
   if (!input.session_id) return;
-  const { mode, relayWindowMs } = readControl();
+  const { mode, relayWindowMs, ntfyTopic } = readControl();
   if (mode !== "dashboard") return;
   const windowMs = clampWindow(relayWindowMs ?? WINDOW_MAX);
-  if (input.hook_event_name === "PreToolUse") return handleApproval(input, windowMs);
+  if (input.hook_event_name === "PreToolUse") return handleApproval(input, windowMs, ntfyTopic);
   if (input.hook_event_name === "Stop") return handlePrompt(input, windowMs);
 }
 

@@ -111,6 +111,50 @@ function dashboardHome() {
   return { home, base };
 }
 
+test("PreToolUse: notifies ntfy topic when a pending approval appears", async () => {
+  const { createServer } = await import("node:http");
+  const hits = [];
+  const srv = createServer((req, res) => {
+    let body = "";
+    req.on("data", (c) => (body += c));
+    req.on("end", () => {
+      hits.push({ url: req.url, body });
+      res.end("ok");
+    });
+  });
+  await new Promise((r) => srv.listen(0, r));
+  const port = srv.address().port;
+
+  const { home, base } = dashboardHome();
+  const control = JSON.parse(fs.readFileSync(path.join(base, "mode.json")));
+  fs.writeFileSync(
+    path.join(base, "mode.json"),
+    JSON.stringify({ ...control, ntfyTopic: "my-topic" }),
+  );
+  const sid = "sess-n";
+  const p = runHook(
+    home,
+    {
+      hook_event_name: "PreToolUse",
+      session_id: sid,
+      tool_name: "Bash",
+      tool_input: { command: "npm test" },
+      cwd: "/repo",
+    },
+    { NTFY_BASE: `http://127.0.0.1:${port}` },
+  );
+  await new Promise((r) => setTimeout(r, 300));
+  fs.mkdirSync(path.join(base, "decisions"), { recursive: true });
+  fs.writeFileSync(path.join(base, "decisions", `${sid}.json`), JSON.stringify({ decision: "deny" }));
+  await p;
+  srv.close();
+
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].url, "/my-topic");
+  assert.match(hits[0].body, /Bash/);
+  assert.match(hits[0].body, /npm test/);
+});
+
 test("PreToolUse: waits for a decision, emits allow, cleans up", async () => {
   const { home, base } = dashboardHome();
   const sid = "sess-a";
@@ -132,6 +176,45 @@ test("PreToolUse: waits for a decision, emits allow, cleans up", async () => {
   assert.equal(JSON.parse(out).hookSpecificOutput.permissionDecision, "allow");
   assert.equal(fs.existsSync(pendingFile), false);
   assert.equal(fs.existsSync(path.join(base, "decisions", `${sid}.json`)), false);
+});
+
+test("PreToolUse: remembered tool is instantly allowed, no pending written", async () => {
+  const { home, base } = dashboardHome();
+  const sid = "sess-r";
+  fs.mkdirSync(path.join(base, "allowed"), { recursive: true });
+  fs.writeFileSync(path.join(base, "allowed", `${sid}.json`), JSON.stringify({ tools: ["Bash"] }));
+  const { code, out } = await runHook(home, {
+    hook_event_name: "PreToolUse",
+    session_id: sid,
+    tool_name: "Bash",
+    tool_input: { command: "ls" },
+    cwd: "/repo",
+  });
+  assert.equal(code, 0);
+  assert.equal(JSON.parse(out).hookSpecificOutput.permissionDecision, "allow");
+  assert.equal(fs.existsSync(path.join(base, "pending", `${sid}.json`)), false);
+});
+
+test("PreToolUse: allow with remember:true records the tool for the session", async () => {
+  const { home, base } = dashboardHome();
+  const sid = "sess-m";
+  const p = runHook(home, {
+    hook_event_name: "PreToolUse",
+    session_id: sid,
+    tool_name: "Write",
+    tool_input: { file_path: "/repo/a.ts" },
+    cwd: "/repo",
+  });
+  await new Promise((r) => setTimeout(r, 150));
+  fs.mkdirSync(path.join(base, "decisions"), { recursive: true });
+  fs.writeFileSync(
+    path.join(base, "decisions", `${sid}.json`),
+    JSON.stringify({ decision: "allow", remember: true }),
+  );
+  const { out } = await p;
+  assert.equal(JSON.parse(out).hookSpecificOutput.permissionDecision, "allow");
+  const allowed = JSON.parse(fs.readFileSync(path.join(base, "allowed", `${sid}.json`), "utf8"));
+  assert.deepEqual(allowed.tools, ["Write"]);
 });
 
 test("PreToolUse: non-gated tool is a no-op", async () => {

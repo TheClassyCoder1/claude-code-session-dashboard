@@ -25,6 +25,7 @@ export type FeatureRecord = {
   endedAt: string;
   updatedAt: string;
   liveState?: "awaiting_approval" | "idle";
+  transcriptPath?: string;
   // Derived in the reader:
   estimatedCostUsd: number;
   totalTokens: number;
@@ -139,6 +140,61 @@ export function groupRecords(records: FeatureRecord[], by: "session" | "project"
       };
     })
     .sort((a, b) => (a.records[0].endedAt < b.records[0].endedAt ? 1 : -1));
+}
+
+/** Case-insensitive text match over the fields a user would search by. */
+export function matchesQuery(r: FeatureRecord, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  return [r.summaryHeadline, r.summary, r.projectName, r.sessionId, ...r.userPrompts]
+    .join("\n")
+    .toLowerCase()
+    .includes(q);
+}
+
+export type DayRollup = { day: string; costUsd: number; outputTokens: number; sessions: number };
+
+/** Per-day cost/token/session rollup for the last `days` days (oldest first),
+ *  keyed on endedAt (UTC). Empty days are present with zeros. */
+export function dailyRollup(records: FeatureRecord[], days: number, now: number): DayRollup[] {
+  const out: DayRollup[] = [];
+  const byDay = new Map<string, DayRollup>();
+  for (let i = days - 1; i >= 0; i--) {
+    const day = new Date(now - i * 86_400_000).toISOString().slice(0, 10);
+    const d = { day, costUsd: 0, outputTokens: 0, sessions: 0 };
+    out.push(d);
+    byDay.set(day, d);
+  }
+  for (const r of records) {
+    const d = byDay.get(r.endedAt.slice(0, 10));
+    if (!d) continue;
+    d.costUsd += r.estimatedCostUsd;
+    d.outputTokens += r.tokens.output;
+    d.sessions += 1;
+  }
+  return out;
+}
+
+/** Standup-style Markdown for one day's sessions (day = "YYYY-MM-DD", UTC). */
+export function exportMarkdown(records: FeatureRecord[], day: string): string {
+  const todays = records.filter((r) => r.endedAt.slice(0, 10) === day);
+  const byProject = new Map<string, FeatureRecord[]>();
+  for (const r of todays) {
+    (byProject.get(r.projectName) ?? byProject.set(r.projectName, []).get(r.projectName)!).push(r);
+  }
+  const cost = todays.reduce((s, r) => s + r.estimatedCostUsd, 0);
+  const lines = [
+    `# Claude sessions — ${day}`,
+    "",
+    `${todays.length} session(s) · est. $${cost.toFixed(2)}`,
+  ];
+  for (const [project, recs] of byProject) {
+    lines.push("", `## ${project}`);
+    for (const r of recs) {
+      lines.push(`- ${r.summaryHeadline?.trim() || r.userPrompts[0] || r.sessionId.slice(0, 8)}`);
+    }
+  }
+  return lines.join("\n");
 }
 
 export function aggregate(records: FeatureRecord[]): Aggregates {

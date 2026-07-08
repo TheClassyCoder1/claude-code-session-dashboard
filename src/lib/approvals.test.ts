@@ -13,6 +13,9 @@ import {
   writeRelayWindowMs,
   readAwaitingPrompts,
   writePrompt,
+  readNtfyTopic,
+  writeNtfyTopic,
+  archiveRecord,
 } from "./approvals.ts";
 
 async function tmpHome(): Promise<string> {
@@ -68,6 +71,21 @@ test("writeMode preserves an existing relay window", async () => {
   assert.equal(await readRelayWindowMs(), 120_000);
 });
 
+test("ntfy topic: default empty, set/clear, merges with mode + window, rejects junk", async () => {
+  await tmpHome();
+  assert.equal(await readNtfyTopic(), "");
+  await writeMode("dashboard");
+  await writeRelayWindowMs(120_000);
+  assert.equal(await writeNtfyTopic("my-topic_1"), "my-topic_1");
+  assert.equal(await readNtfyTopic(), "my-topic_1");
+  assert.equal(await readMode(), "dashboard");
+  assert.equal(await readRelayWindowMs(), 120_000);
+  await writeNtfyTopic("");
+  assert.equal(await readNtfyTopic(), "");
+  await assert.rejects(() => writeNtfyTopic("bad topic!"));
+  await assert.rejects(() => writeNtfyTopic(42));
+});
+
 test("writePrompt validates and writes queued prompt", async () => {
   const home = await tmpHome();
   await writePrompt("sess-1", "do the thing");
@@ -76,6 +94,20 @@ test("writePrompt validates and writes queued prompt", async () => {
   await assert.rejects(() => writePrompt("../x", "hi"));
   await assert.rejects(() => writePrompt("sess-1", ""));
   await assert.rejects(() => writePrompt("sess-1", 42));
+});
+
+test("archiveRecord moves the record file into archived/, validates inputs", async () => {
+  const home = await tmpHome();
+  const slugDir = path.join(home, ".claude", "feature-log", "-repo-proj");
+  await fs.mkdir(slugDir, { recursive: true });
+  await fs.writeFile(path.join(slugDir, "sess-1.json"), "{}");
+  await archiveRecord("/repo/proj", "sess-1");
+  const archived = path.join(home, ".claude", "feature-log", "archived", "-repo-proj", "sess-1.json");
+  assert.equal(JSON.parse(await fs.readFile(archived, "utf8")) instanceof Object, true);
+  await assert.rejects(() => fs.access(path.join(slugDir, "sess-1.json")));
+  await assert.rejects(() => archiveRecord("/repo/proj", "../evil"));
+  await assert.rejects(() => archiveRecord(42, "sess-1"));
+  await assert.rejects(() => archiveRecord("/repo/proj", "missing")); // no such record
 });
 
 test("readAwaitingPrompts returns fresh, drops stale", async () => {

@@ -87,6 +87,24 @@ prompt for approvals).
 Powered by the same `tools/dashboard-hook/dashboard-hook.mjs` (on `Stop`), installed by
 `npm run hooks` — one hook handles both approvals (PreToolUse) and prompts (Stop).
 
+## 🧰 More dashboard features
+
+- **Opt-in auth / read-only sharing** — set `DASHBOARD_TOKEN` (env / `.env.local`); action
+  APIs then require unlocking with the token, while the page stays viewable read-only.
+- **Push notifications** — set an **ntfy** topic in the header (Dashboard mode) and
+  subscribe to it in the [ntfy](https://ntfy.sh) app; you get pinged when a session is
+  Waiting for you.
+- **Approve + remember** — checkbox on the approval card allows that tool for the rest
+  of the session (no repeat prompts).
+- **New session** — launch a headless `claude -p` run in any known project from the UI.
+- **Live tail** — in-progress cards show Claude's latest words, refreshed every 3s.
+- **Cost chart & activity heatmap** — daily est. spend (14 days) and a 12-week
+  sessions-per-day grid.
+- **Search, archive, export** — full-text session search; archive cards you're done
+  with; copy today's sessions as standup Markdown.
+- **Resume & diff** — every card carries copyable `claude --resume` and scoped
+  `git diff` commands.
+
 ## 🚀 Setup
 
 ### 1. Install the hook _(one time, global)_
@@ -114,6 +132,21 @@ npm run dev      # → http://localhost:3000
 
 The dashboard reads `~/.claude/feature-log/`. If it's empty, work in a Claude Code
 session (with the hook installed) and refresh.
+
+### 3. Optional: open it from your phone (tunnel)
+
+Expose the dev server with a tunnel (e.g. `ngrok http 3000 --url=<your-host>`), then
+allow that origin for dev assets — Next.js dev mode blocks cross-origin requests to
+its resources by default, so without this the page renders but **nothing is
+clickable** (client JS never boots):
+
+```bash
+# .env.local (gitignored — keep real hosts out of git)
+DEV_ORIGINS=your-tunnel.ngrok-free.app
+```
+
+Restart `npm run dev` after changing it (comma-separate multiple hosts). If you're
+exposing the dashboard, also set `DASHBOARD_TOKEN` so actions require unlocking.
 
 > **Remove the hook later:** `node tools/feature-logger/uninstall.mjs`
 > (backs up `settings.json`, leaves captured records in place).

@@ -6,6 +6,7 @@ import {
 } from "@/lib/featureTypes";
 import { formatDate, formatTokens, formatUsd, shortModel } from "@/lib/format";
 import CopyCommand from "./CopyCommand";
+import ArchiveButton from "./ArchiveButton";
 
 function TokenStat({ label, value }: { label: string; value: number }) {
   return (
@@ -16,7 +17,13 @@ function TokenStat({ label, value }: { label: string; value: number }) {
   );
 }
 
-export default function FeatureItem({ record }: { record: FeatureRecord }) {
+export default function FeatureItem({
+  record,
+  liveTail,
+}: {
+  record: FeatureRecord;
+  liveTail?: string;
+}) {
   const status = deriveStatus(record);
   const meta = STATUS_META[status];
   const changes = countChanges(record);
@@ -52,6 +59,12 @@ export default function FeatureItem({ record }: { record: FeatureRecord }) {
               </span>
             )}
           </p>
+          {liveTail && (
+            <p className="mt-1 flex items-start gap-1.5 text-xs text-slate-600">
+              <span className="mt-1 h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-blue-500" />
+              <span className="line-clamp-2 italic">{liveTail}</span>
+            </p>
+          )}
         </div>
         <div className="flex shrink-0 items-center gap-3 text-right sm:gap-4">
           <div className="hidden sm:block">
@@ -74,12 +87,27 @@ export default function FeatureItem({ record }: { record: FeatureRecord }) {
         <p className="mb-3 text-xs italic text-slate-400">{meta.description}</p>
 
         <div className="mb-4">
-          <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">
-            Resume this session
-          </h4>
+          <div className="mb-1 flex items-center justify-between">
+            <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+              Resume this session
+            </h4>
+            <ArchiveButton projectPath={record.projectPath} sessionId={record.sessionId} />
+          </div>
           <CopyCommand
             command={`cd ${record.projectPath} && claude --resume ${record.sessionId}`}
           />
+          {changes > 0 && (
+            <div className="mt-1">
+              {/* ponytail: copyable git-diff command scoped to this session's files —
+                  a full in-dashboard diff viewer is a separate project. */}
+              <CopyCommand
+                command={`git -C ${record.projectPath} diff -- ${Object.values(record.filesByArea)
+                  .flatMap((b) => [...b.created, ...b.edited])
+                  .map((f) => `'${f}'`)
+                  .join(" ")}`}
+              />
+            </div>
+          )}
         </div>
 
         {status === "done" && narrativeBody ? (

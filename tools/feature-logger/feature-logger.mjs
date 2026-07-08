@@ -441,6 +441,9 @@ function main() {
       summaryUsage: existing.summaryUsage,
       summaryCostUsd: existing.summaryCostUsd,
       liveState: liveStateForEvent(event, input.message, existing.liveState),
+      // Where this session's transcript lives — lets the dashboard tail the
+      // latest assistant text for in-progress cards.
+      transcriptPath: transcriptPath || existing.transcriptPath || "",
       updatedAt: new Date().toISOString(),
     };
 

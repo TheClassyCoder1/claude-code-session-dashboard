@@ -43,5 +43,6 @@ next-env.d.ts
 # claude-kanban data store (JSON persistence)
 .data/
 
-# allow the example env file to be committed
+# allow the sample env file to be committed (.env.local holds real values)
 !.env.example
+!.env

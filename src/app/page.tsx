@@ -3,23 +3,42 @@ import AutoRefresh from "@/components/AutoRefresh";
 import TabBadge from "@/components/TabBadge";
 import ModeToggle from "@/components/ModeToggle";
 import RelayWindowSelect from "@/components/RelayWindowSelect";
+import UnlockForm from "@/components/UnlockForm";
 import { readFeatureRecords } from "@/lib/featureLog";
 import { deriveStatus } from "@/lib/featureTypes";
-import { readMode, readPendingApprovals, readAwaitingPrompts, readRelayWindowMs } from "@/lib/approvals";
+import {
+  readMode,
+  readPendingApprovals,
+  readAwaitingPrompts,
+  readRelayWindowMs,
+} from "@/lib/approvals";
+import { isAuthed, AUTH_COOKIE } from "@/lib/auth";
+import { readLiveTail } from "@/lib/tail";
+import { cookies } from "next/headers";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
-  const [records, mode, pending, awaiting, relayWindowMs] = await Promise.all([
+  const [records, mode, pending, awaiting, relayWindowMs, cookieStore] = await Promise.all([
     readFeatureRecords(),
     readMode(),
     readPendingApprovals(),
     readAwaitingPrompts(),
     readRelayWindowMs(),
+    cookies(),
   ]);
+  const authCookie = cookieStore.get(AUTH_COOKIE)?.value;
+  const canAct = isAuthed(authCookie ? `${AUTH_COOKIE}=${authCookie}` : null);
   const pendingBySession = Object.fromEntries(pending.map((p) => [p.sessionId, p]));
   const awaitingBySession = Object.fromEntries(awaiting.map((a) => [a.sessionId, a]));
+
+  // Live tail for actively-working sessions — re-read on every 3s RSC refresh.
+  const working = records.filter((r) => deriveStatus(r) === "in_progress" && r.transcriptPath);
+  const tails = await Promise.all(working.map((r) => readLiveTail(r.transcriptPath)));
+  const tailBySession = Object.fromEntries(
+    working.map((r, i) => [r.sessionId, tails[i]]).filter(([, t]) => t),
+  );
   const attention =
     pending.length +
     awaiting.length +
@@ -39,14 +58,21 @@ export default async function Home() {
             </p>
           </div>
           <div className="flex shrink-0 flex-wrap items-center gap-3">
-            {mode === "dashboard" && <RelayWindowSelect ms={relayWindowMs} />}
-            <ModeToggle mode={mode} />
+            {canAct ? (
+              <>
+                {mode === "dashboard" && <RelayWindowSelect ms={relayWindowMs} />}
+                <ModeToggle mode={mode} />
+              </>
+            ) : (
+              <UnlockForm />
+            )}
           </div>
         </header>
         <FeatureDashboard
           records={records}
-          pendingBySession={pendingBySession}
-          awaitingBySession={awaitingBySession}
+          pendingBySession={canAct ? pendingBySession : {}}
+          awaitingBySession={canAct ? awaitingBySession : {}}
+          tailBySession={tailBySession}
         />
       </div>
       <AutoRefresh />

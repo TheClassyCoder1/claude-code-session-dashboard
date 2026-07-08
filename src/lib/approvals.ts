@@ -40,12 +40,16 @@ async function writeAtomic(file: string, obj: unknown): Promise<void> {
   await fs.rename(tmp, file);
 }
 
-type Control = { mode: Mode; relayWindowMs?: number };
+type Control = { mode: Mode; relayWindowMs?: number; ntfyTopic?: string };
 
 async function readControl(): Promise<Control> {
   try {
     const c = JSON.parse(await fs.readFile(modeFile(), "utf8"));
-    return { mode: c.mode === "dashboard" ? "dashboard" : "cli", relayWindowMs: c.relayWindowMs };
+    return {
+      mode: c.mode === "dashboard" ? "dashboard" : "cli",
+      relayWindowMs: c.relayWindowMs,
+      ntfyTopic: c.ntfyTopic,
+    };
   } catch {
     return { mode: "cli" };
   }
@@ -75,12 +79,31 @@ export async function writeRelayWindowMs(ms: unknown): Promise<number> {
   return clamped;
 }
 
-export async function writeDecision(sessionId: unknown, decision: unknown): Promise<void> {
+export async function readNtfyTopic(): Promise<string> {
+  return (await readControl()).ntfyTopic || "";
+}
+
+/** Set (or clear with "") the ntfy topic used for push notifications. */
+export async function writeNtfyTopic(topic: unknown): Promise<string> {
+  const t = z.string().max(120).regex(/^[A-Za-z0-9._-]*$/).parse(topic);
+  const cur = await readControl();
+  await writeAtomic(modeFile(), { ...cur, ntfyTopic: t || undefined });
+  return t;
+}
+
+export async function writeDecision(
+  sessionId: unknown,
+  decision: unknown,
+  remember?: unknown,
+): Promise<void> {
   if (typeof sessionId !== "string" || !isSafeSessionId(sessionId)) {
     throw new Error("invalid sessionId");
   }
   const d = z.enum(["allow", "deny"]).parse(decision);
-  await writeAtomic(path.join(decisionsDir(), `${sessionId}.json`), { decision: d });
+  await writeAtomic(path.join(decisionsDir(), `${sessionId}.json`), {
+    decision: d,
+    remember: remember === true,
+  });
 }
 
 const pendingSchema = z.object({
@@ -141,6 +164,22 @@ export async function readAwaitingPrompts(now: number = Date.now()): Promise<Awa
     }
   }
   return out;
+}
+
+/** Move a session's record file into archived/ (hides it from the dashboard).
+ *  Mirrors the hook's slug scheme: projectPath with "/" → "-". */
+export async function archiveRecord(projectPath: unknown, sessionId: unknown): Promise<void> {
+  if (typeof projectPath !== "string" || !projectPath.startsWith("/")) {
+    throw new Error("invalid projectPath");
+  }
+  if (typeof sessionId !== "string" || !isSafeSessionId(sessionId)) {
+    throw new Error("invalid sessionId");
+  }
+  const slug = projectPath.replace(/\//g, "-");
+  const src = path.join(base(), slug, `${sessionId}.json`);
+  const dest = path.join(base(), "archived", slug, `${sessionId}.json`);
+  await fs.mkdir(path.dirname(dest), { recursive: true });
+  await fs.rename(src, dest); // throws if the record doesn't exist
 }
 
 export async function writePrompt(sessionId: unknown, prompt: unknown): Promise<void> {
