@@ -7,9 +7,7 @@ export function formatTokens(n: number): string {
   return String(n);
 }
 
-export function formatUsd(n: number | undefined | null): string {
-  if (n == null) return "—";
-  if (n > 0 && n < 0.01) return `$${n.toFixed(4)}`;
+export function formatUsd(n: number): string {
   return `$${n.toFixed(2)}`;
 }
 
